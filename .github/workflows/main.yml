@@ -56,12 +56,26 @@ jobs:
 
       - name: Install Twingate
         run: |
-          # Install Twingate client on the Windows runner
+          # Download Twingate Installer
           $twingateInstallerUrl = "https://download.twingate.com/twingate-windows-installer-latest.exe"
           $installerPath = "$env:TEMP\twingate-installer.exe"
-          
+
+          Write-Host "Downloading Twingate installer..."
           Invoke-WebRequest -Uri $twingateInstallerUrl -OutFile $installerPath
+
+          # Check if the installer file exists and is accessible
+          if (Test-Path $installerPath) {
+              Write-Host "Installer downloaded successfully."
+          } else {
+              Write-Error "Installer not downloaded. Exiting."
+              exit 1
+          }
+
+          # Run installer silently
+          Write-Host "Installing Twingate..."
           Start-Process $installerPath -ArgumentList "/silent" -Wait
+
+          # Cleanup: Remove installer after installation
           Remove-Item $installerPath -Force
 
       - name: Authenticate and Connect with Twingate
