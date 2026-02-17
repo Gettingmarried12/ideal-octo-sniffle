@@ -56,9 +56,15 @@ jobs:
 
       - name: Install Twingate
         run: |
-          # Download Twingate Installer
+          # Specify a new directory for the installer
+          $installDir = "C:\TwingateInstaller"
           $twingateInstallerUrl = "https://download.twingate.com/twingate-windows-installer-latest.exe"
-          $installerPath = "$env:TEMP\twingate-installer.exe"
+          $installerPath = "$installDir\twingate-installer.exe"
+
+          # Create the installation directory if it doesn't exist
+          if (-not (Test-Path $installDir)) {
+              New-Item -Path $installDir -ItemType Directory
+          }
 
           Write-Host "Downloading Twingate installer..."
           Invoke-WebRequest -Uri $twingateInstallerUrl -OutFile $installerPath
@@ -71,9 +77,9 @@ jobs:
               exit 1
           }
 
-          # Run installer silently
+          # Run the installer silently
           Write-Host "Installing Twingate..."
-          Start-Process $installerPath -ArgumentList "/silent" -Wait
+          Start-Process -FilePath $installerPath -ArgumentList "/silent" -Wait -NoNewWindow
 
           # Cleanup: Remove installer after installation
           Remove-Item $installerPath -Force
