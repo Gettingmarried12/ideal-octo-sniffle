@@ -1,3 +1,59 @@
+name: RDP Setup with Twingate
+
+on:
+  workflow_dispatch:
+
+jobs:
+  secure-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Configure Core RDP Settings
+        run: |
+          # Enable Remote Desktop and disable Network Level Authentication (NLA) for testing
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+                             -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "SecurityLayer" -Value 0 -Force
+
+          # Open RDP port (3389) in the firewall for Twingate network
+          netsh advfirewall firewall add rule name="Allow RDP Twingate" `
+            dir=in action=allow protocol=TCP localport=3389
+
+          # Restart the Remote Desktop service to ensure changes take effect
+          Restart-Service -Name TermService -Force
+
+      - name: Create RDP User with Secure Password
+        run: |
+          Add-Type -AssemblyName System.Security
+          $charSet = @(
+              [char[]](65..90), # Uppercase A-Z
+              [char[]](97..122), # Lowercase a-z
+              [char[]](48..57), # Numbers 0-9
+              ([char[]](33..47) + [char[]](58..64) + [char[]](91..96) + [char[]](123..126)) # Special characters
+          )
+          $rawPassword = @()
+          $rawPassword += $charSet[0] | Get-Random -Count 4
+          $rawPassword += $charSet[1] | Get-Random -Count 4
+          $rawPassword += $charSet[2] | Get-Random -Count 4
+          $rawPassword += $charSet[3] | Get-Random -Count 4
+          $password = -join ($rawPassword | Sort-Object { Get-Random })
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
+          
+          # Output RDP credentials for future reference
+          echo "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV
+          
+          if (-not (Get-LocalUser -Name "RDP")) {
+              Write-Error "User creation failed"
+              exit 1
+          }
+
       - name: Install Chocolatey
         run: |
           # Install Chocolatey package manager if it's not already installed
@@ -28,3 +84,29 @@
           # Verify the Twingate connection (check IP or network route)
           $twingateStatus = & "C:\Program Files\Twingate\twingate.exe" status
           Write-Host "Twingate Status: $twingateStatus"
+
+      - name: Verify RDP Accessibility
+        run: |
+          Write-Host "Twingate network is connected, verifying RDP access..."
+
+          # Test connectivity using Test-NetConnection on RDP port 3389
+          $testResult = Test-NetConnection -ComputerName "127.0.0.1" -Port 3389
+          if (-not $testResult.TcpTestSucceeded) {
+              Write-Error "TCP connection to RDP port 3389 failed"
+              exit 1
+          }
+          Write-Host "TCP connectivity successful!"
+
+      - name: Maintain Connection (Keep RDP Active)
+        run: |
+          Write-Host "`n=== RDP ACCESS ==="
+          Write-Host "Address: 127.0.0.1 (Via Twingate Network)"
+          Write-Host "Username: RDP"
+          Write-Host "Password: $(echo $env:RDP_CREDS)"
+          Write-Host "==================`n"
+          
+          # Keep the workflow running until manually stopped (for persistent access)
+          while ($true) {
+              Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"
+              Start-Sleep -Seconds 300
+          }
